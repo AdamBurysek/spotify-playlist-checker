@@ -5,10 +5,10 @@ import 'react-tabs/style/react-tabs.css';
 interface TabData {
   id: string;
   name: string;
-  content: string;
   csvFile: File | null;
   songs: Song[];
   csvLoaded: boolean;
+  isLoading: boolean;
 }
 
 interface Song {
@@ -20,26 +20,27 @@ interface Song {
 
 const TabbedLanding: React.FC = () => {
   const [tabs, setTabs] = useState<TabData[]>([
-    { id: '1', name: 'Hello', content: 'Hello', csvFile: null, songs: [], csvLoaded: false }
+    { id: '1', name: 'Hello', csvFile: null, songs: [], csvLoaded: false, isLoading: false }
   ]);
   const [activeTab, setActiveTab] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTabName, setNewTabName] = useState('');
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [tabToDelete, setTabToDelete] = useState<TabData | null>(null);
-  
-  // Loading state for current tab
-  const [isLoading, setIsLoading] = useState(false);
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [tabToRename, setTabToRename] = useState<TabData | null>(null);
+  const [renameTabName, setRenameTabName] = useState('');
+  const [longPressTimer, setLongPressTimer] = useState<number | null>(null);
 
   const addNewTab = () => {
     if (newTabName.trim()) {
       const newTab: TabData = {
         id: Date.now().toString(),
         name: newTabName.trim(),
-        content: newTabName.trim(),
         csvFile: null,
         songs: [],
-        csvLoaded: false
+        csvLoaded: false,
+        isLoading: false
       };
       setTabs([...tabs, newTab]);
       setNewTabName('');
@@ -61,6 +62,14 @@ const TabbedLanding: React.FC = () => {
     }
   };
 
+  const handleRenameKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      renameTab();
+    } else if (e.key === 'Escape') {
+      closeRenameModal();
+    }
+  };
+
   const handleTabDoubleClick = (tab: TabData) => {
     // Prevent deleting the last tab
     if (tabs.length <= 1) {
@@ -69,6 +78,52 @@ const TabbedLanding: React.FC = () => {
     }
     setTabToDelete(tab);
     setIsDeleteModalOpen(true);
+  };
+
+  const handleTabLongClick = (tab: TabData) => {
+    setTabToRename(tab);
+    setRenameTabName(tab.name);
+    setIsRenameModalOpen(true);
+  };
+
+  const handleMouseDown = (tab: TabData) => {
+    const timer = setTimeout(() => {
+      handleTabLongClick(tab);
+    }, 800); // 800ms long press
+    setLongPressTimer(timer);
+  };
+
+  const handleMouseUp = () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      setLongPressTimer(null);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      setLongPressTimer(null);
+    }
+  };
+
+  const renameTab = () => {
+    if (renameTabName.trim() && tabToRename) {
+      setTabs(tabs.map(tab => 
+        tab.id === tabToRename.id 
+          ? { ...tab, name: renameTabName.trim() }
+          : tab
+      ));
+      setRenameTabName('');
+      setIsRenameModalOpen(false);
+      setTabToRename(null);
+    }
+  };
+
+  const closeRenameModal = () => {
+    setIsRenameModalOpen(false);
+    setRenameTabName('');
+    setTabToRename(null);
   };
 
   const deleteTab = () => {
@@ -160,7 +215,12 @@ const TabbedLanding: React.FC = () => {
       return;
     }
 
-    setIsLoading(true);
+    // Set loading state for this specific tab
+    setTabs(tabs.map(tab => 
+      tab.id === tabId 
+        ? { ...tab, isLoading: true }
+        : tab
+    ));
     
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -170,20 +230,30 @@ const TabbedLanding: React.FC = () => {
         
         if (songs.length === 0) {
           alert('No valid songs found in the CSV file');
+          // Reset loading state
+          setTabs(tabs.map(tab => 
+            tab.id === tabId 
+              ? { ...tab, isLoading: false }
+              : tab
+          ));
           return;
         }
         
         setTabs(tabs.map(tab => 
           tab.id === tabId 
-            ? { ...tab, csvFile: file, songs: songs, csvLoaded: true }
+            ? { ...tab, csvFile: file, songs: songs, csvLoaded: true, isLoading: false }
             : tab
         ));
         
       } catch (error) {
         console.error('Error parsing CSV:', error);
         alert('Error parsing CSV file. Please check the format.');
-      } finally {
-        setIsLoading(false);
+        // Reset loading state
+        setTabs(tabs.map(tab => 
+          tab.id === tabId 
+            ? { ...tab, isLoading: false }
+            : tab
+        ));
       }
     };
     
@@ -227,7 +297,10 @@ const TabbedLanding: React.FC = () => {
                 className="px-4 py-2 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-800 hover:border-gray-300 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 rounded-t-lg transition-colors duration-200"
                 selectedClassName="text-blue-600 border-blue-600"
                 onDoubleClick={() => handleTabDoubleClick(tab)}
-                title="Double-click to delete tab"
+                onMouseDown={() => handleMouseDown(tab)}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseLeave}
+                title="Double-click to delete tab, long press to rename"
               >
                 {tab.name}
               </Tab>
@@ -244,176 +317,179 @@ const TabbedLanding: React.FC = () => {
           </TabList>
         </div>
 
-        <div className="flex-1 p-6">
-          {tabs.map((tab) => (
+        
+          {tabs.map((tab, index) => (
+            
             <TabPanel key={tab.id} className="h-full">
-              <div className="h-full flex flex-col">
-                {!tab.csvLoaded ? (
-                  // Input state - show CSV upload
-                  <div className="flex-1 flex items-center justify-center">
-                    <div className="w-full max-w-2xl">
-                      <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
-                        {tab.name} - CSV Music Library
-                      </h2>
-                      <div className="text-center">
-                        <div className="mb-4">
-                          <label htmlFor={`csvFile-${tab.id}`} className="block text-sm font-medium text-gray-700 mb-2">
-                            Upload CSV File
-                          </label>
-                          <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-gray-400 transition-colors duration-200">
-                            <div className="space-y-1 text-center">
-                              <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                              <div className="flex text-sm text-gray-600">
-                                <label htmlFor={`csvFile-${tab.id}`} className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
-                                  <span>Upload a file</span>
-                                  <input
-                                    id={`csvFile-${tab.id}`}
-                                    type="file"
-                                    accept=".csv"
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) {
-                                        handleCSVUpload(tab.id, file);
-                                      }
-                                    }}
-                                    className="sr-only"
-                                    disabled={isLoading}
-                                  />
-                                </label>
-                                <p className="pl-1">or drag and drop</p>
-                              </div>
-                              <p className="text-xs text-gray-500">
-                                CSV files only. Expected format: #, Song, Artist, ...
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        {isLoading && (
-                          <div className="flex items-center justify-center">
-                            <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            <span className="text-sm text-gray-600">Processing CSV file...</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  // Table state - show CSV data table
-                  <div className="h-full flex flex-col">
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <h2 className="text-2xl font-bold text-gray-800">
-                          {tab.name} - Music Library ({tab.songs.length})
+              {index === activeTab && (
+                <div className="h-full flex flex-col">
+                  {!tab.csvLoaded ? (
+                    // Input state - show CSV upload
+                    <div className="flex-1 flex items-center justify-center">
+                      <div className="w-full max-w-2xl">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
+                          {tab.name} - CSV Music Library
                         </h2>
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
-                            CSV Loaded
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mb-2">
-                        File: <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{tab.csvFile?.name}</span>
-                      </p>
-                      <p className="text-xs text-gray-500 mb-4">
-                        Songs loaded from CSV file. Select songs to manage your library.
-                      </p>
-                      <button
-                        onClick={() => {
-                          setTabs(tabs.map(t => 
-                            t.id === tab.id ? { ...t, csvFile: null, songs: [], csvLoaded: false } : t
-                          ));
-                        }}
-                        className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md transition-colors duration-200"
-                      >
-                        Upload Different CSV
-                      </button>
-                    </div>
-
-                    {tab.songs.length > 0 && (
-                      <div className="flex-1 overflow-hidden">
-                        <div className="bg-white rounded-lg shadow-sm border h-full flex flex-col">
-                          <div className="p-4 border-b bg-gray-50">
-                            <div className="flex items-center justify-between">
-                              <h3 className="text-lg font-semibold text-gray-800">
-                                Songs ({tab.songs.length})
-                              </h3>
-                              <button
-                                onClick={() => handleSelectAll(tab.id)}
-                                className="px-3 py-1 text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md transition-colors duration-200"
-                              >
-                                {tab.songs.every(song => song.checked) ? 'Deselect All' : 'Select All'}
-                              </button>
+                        <div className="text-center">
+                          <div className="mb-4">
+                            <label htmlFor={`csvFile-${tab.id}`} className="block text-sm font-medium text-gray-700 mb-2">
+                              Upload CSV File
+                            </label>
+                            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-gray-400 transition-colors duration-200">
+                              <div className="space-y-1 text-center">
+                                <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                  <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                                <div className="flex text-sm text-gray-600">
+                                  <label htmlFor={`csvFile-${tab.id}`} className="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+                                    <span>Upload a file</span>
+                                    <input
+                                      id={`csvFile-${tab.id}`}
+                                      type="file"
+                                      accept=".csv"
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          handleCSVUpload(tab.id, file);
+                                        }
+                                      }}
+                                      className="sr-only"
+                                      disabled={tab.isLoading}
+                                    />
+                                  </label>
+                                  <p className="pl-1">or drag and drop</p>
+                                </div>
+                                <p className="text-xs text-gray-500">
+                                  CSV files only. Expected format: #, Song, Artist, ...
+                                </p>
+                              </div>
                             </div>
                           </div>
-                          <div className="flex-1 overflow-auto">
-                            <table className="w-full">
-                              <thead className="bg-gray-50 sticky top-0">
-                                <tr>
-                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
-                                    <input
-                                      type="checkbox"
-                                      checked={tab.songs.every(song => song.checked)}
-                                      onChange={() => handleSelectAll(tab.id)}
-                                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                    />
-                                  </th>
-                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Song Name
-                                  </th>
-                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Artist
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody className="bg-white divide-y divide-gray-200">
-                                {tab.songs.map((song) => (
-                                  <tr key={song.id} className={song.checked ? 'bg-blue-50' : 'hover:bg-gray-50'}>
-                                    <td className="px-4 py-3 whitespace-nowrap">
+                          {tab.isLoading && (
+                            <div className="flex items-center justify-center">
+                              <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              <span className="text-sm text-gray-600">Processing CSV file...</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    // Table state - show CSV data table
+                    <div className="h-full flex flex-col">
+                      <div className="mb-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <h2 className="text-2xl font-bold text-gray-800">
+                            {tab.name} - Music Library ({tab.songs.length})
+                          </h2>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                              CSV Loaded
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-2">
+                          File: <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{tab.csvFile?.name}</span>
+                        </p>
+                        <p className="text-xs text-gray-500 mb-4">
+                          Songs loaded from CSV file. Select songs to manage your library.
+                        </p>
+                        <button
+                          onClick={() => {
+                            setTabs(tabs.map(t => 
+                              t.id === tab.id ? { ...t, csvFile: null, songs: [], csvLoaded: false } : t
+                            ));
+                          }}
+                          className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md transition-colors duration-200"
+                        >
+                          Upload Different CSV
+                        </button>
+                      </div>
+
+                      {tab.songs.length > 0 && (
+                        <div className="flex-1 overflow-hidden">
+                          <div className="bg-white rounded-lg shadow-sm border h-full flex flex-col">
+                            <div className="p-4 border-b bg-gray-50">
+                              <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-semibold text-gray-800">
+                                  Songs ({tab.songs.length})
+                                </h3>
+                                <button
+                                  onClick={() => handleSelectAll(tab.id)}
+                                  className="px-3 py-1 text-sm bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-md transition-colors duration-200"
+                                >
+                                  {tab.songs.every(song => song.checked) ? 'Deselect All' : 'Select All'}
+                                </button>
+                              </div>
+                            </div>
+                            <div className="flex-1 overflow-auto">
+                              <table className="w-full">
+                                <thead className="bg-gray-50 sticky top-0">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
                                       <input
                                         type="checkbox"
-                                        checked={song.checked}
-                                        onChange={() => handleSongCheck(tab.id, song.id)}
+                                        checked={tab.songs.every(song => song.checked)}
+                                        onChange={() => handleSelectAll(tab.id)}
                                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                       />
-                                    </td>
-                                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
-                                      {song.name}
-                                    </td>
-                                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                                      {song.artist}
-                                    </td>
+                                    </th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                      Song Name
+                                    </th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                      Artist
+                                    </th>
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody className="bg-white divide-y divide-gray-200">
+                                  {tab.songs.map((song) => (
+                                    <tr key={song.id} className={song.checked ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                                      <td className="px-4 py-3 whitespace-nowrap">
+                                        <input
+                                          type="checkbox"
+                                          checked={song.checked}
+                                          onChange={() => handleSongCheck(tab.id, song.id)}
+                                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                        />
+                                      </td>
+                                      <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                                        {song.name}
+                                      </td>
+                                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                        {song.artist}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {tab.songs.length === 0 && (
-                      <div className="flex-1 flex items-center justify-center">
-                        <div className="text-center">
-                          <div className="text-gray-400 mb-2">
-                            <svg className="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                            </svg>
+                      {tab.songs.length === 0 && (
+                        <div className="flex-1 flex items-center justify-center">
+                          <div className="text-center">
+                            <div className="text-gray-400 mb-2">
+                              <svg className="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                              </svg>
+                            </div>
+                            <p className="text-gray-500">No songs found in this playlist</p>
                           </div>
-                          <p className="text-gray-500">No songs found in this playlist</p>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </TabPanel>
           ))}
-        </div>
+  
       </Tabs>
 
       {/* Modal */}
@@ -485,6 +561,50 @@ const TabbedLanding: React.FC = () => {
               >
                 Delete Tab
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rename Modal */}
+      {isRenameModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="p-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Rename Tab
+              </h3>
+              <div className="mb-4">
+                <label htmlFor="renameTabName" className="block text-sm font-medium text-gray-700 mb-2">
+                  Tab Name
+                </label>
+                <input
+                  id="renameTabName"
+                  type="text"
+                  value={renameTabName}
+                  onChange={(e) => setRenameTabName(e.target.value)}
+                  onKeyPress={handleRenameKeyPress}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter new tab name"
+                  autoFocus
+                />
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={closeRenameModal}
+                  onKeyPress={handleRenameKeyPress}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={renameTab}
+                  onKeyPress={handleRenameKeyPress}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                >
+                  Rename Tab
+                </button>
+              </div>
             </div>
           </div>
         </div>
