@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Tab, Tabs, TabList, TabPanel } from 'react-tabs';
 import 'react-tabs/style/react-tabs.css';
 
@@ -6,6 +6,7 @@ interface TabData {
   id: string;
   name: string;
   csvFile: File | null;
+  csvFileName: string | null; // Store filename for persistence
   songs: Song[];
   csvLoaded: boolean;
   isLoading: boolean;
@@ -18,10 +19,41 @@ interface Song {
   checked: boolean;
 }
 
+// Local storage functions
+const saveTabsToStorage = (tabs: TabData[]) => {
+  try {
+    const tabsToSave = tabs.map(tab => ({
+      ...tab,
+      csvFile: null, // Don't save File objects
+      isLoading: false // Reset loading state
+    }));
+    localStorage.setItem('spotify-playlist-checker-tabs', JSON.stringify(tabsToSave));
+  } catch (error) {
+    console.error('Error saving tabs to localStorage:', error);
+  }
+};
+
+const loadTabsFromStorage = (): TabData[] => {
+  try {
+    const saved = localStorage.getItem('spotify-playlist-checker-tabs');
+    if (saved) {
+      const parsedTabs = JSON.parse(saved);
+      return parsedTabs.map((tab: any) => ({
+        ...tab,
+        csvFile: null, // File objects can't be restored
+        isLoading: false // Reset loading state
+      }));
+    }
+  } catch (error) {
+    console.error('Error loading tabs from localStorage:', error);
+  }
+  return [
+    { id: '1', name: 'Hello', csvFile: null, csvFileName: null, songs: [], csvLoaded: false, isLoading: false }
+  ];
+};
+
 const TabbedLanding: React.FC = () => {
-  const [tabs, setTabs] = useState<TabData[]>([
-    { id: '1', name: 'Hello', csvFile: null, songs: [], csvLoaded: false, isLoading: false }
-  ]);
+  const [tabs, setTabs] = useState<TabData[]>(loadTabsFromStorage());
   const [activeTab, setActiveTab] = useState(0);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newTabName, setNewTabName] = useState('');
@@ -32,12 +64,18 @@ const TabbedLanding: React.FC = () => {
   const [renameTabName, setRenameTabName] = useState('');
   const [longPressTimer, setLongPressTimer] = useState<number | null>(null);
 
+  // Save tabs to localStorage whenever tabs change
+  useEffect(() => {
+    saveTabsToStorage(tabs);
+  }, [tabs]);
+
   const addNewTab = () => {
     if (newTabName.trim()) {
       const newTab: TabData = {
         id: Date.now().toString(),
         name: newTabName.trim(),
         csvFile: null,
+        csvFileName: null,
         songs: [],
         csvLoaded: false,
         isLoading: false
@@ -241,7 +279,7 @@ const TabbedLanding: React.FC = () => {
         
         setTabs(tabs.map(tab => 
           tab.id === tabId 
-            ? { ...tab, csvFile: file, songs: songs, csvLoaded: true, isLoading: false }
+            ? { ...tab, csvFile: file, csvFileName: file.name, songs: songs, csvLoaded: true, isLoading: false }
             : tab
         ));
         
@@ -392,7 +430,7 @@ const TabbedLanding: React.FC = () => {
                           </div>
                         </div>
                         <p className="text-sm text-gray-600 mb-2">
-                          File: <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{tab.csvFile?.name}</span>
+                          File: <span className="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{tab.csvFile?.name || tab.csvFileName}</span>
                         </p>
                         <p className="text-xs text-gray-500 mb-4">
                           Songs loaded from CSV file. Select songs to manage your library.
@@ -400,7 +438,7 @@ const TabbedLanding: React.FC = () => {
                         <button
                           onClick={() => {
                             setTabs(tabs.map(t => 
-                              t.id === tab.id ? { ...t, csvFile: null, songs: [], csvLoaded: false } : t
+                              t.id === tab.id ? { ...t, csvFile: null, csvFileName: null, songs: [], csvLoaded: false } : t
                             ));
                           }}
                           className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md transition-colors duration-200"
